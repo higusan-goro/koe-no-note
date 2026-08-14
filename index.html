@@ -196,7 +196,8 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   <section class="stage">
     <header class="masthead">
       <h1 class="title">こえのノート</h1>
-      <span class="model-tag" id="modelTag">claude-sonnet-5</span>
+      <span class="model-tag" id="modelTag">gemini-3.5-flash</span>
+      <span class="model-tag" id="verTag">v9</span>
     </header>
 
     <div class="center">
@@ -1077,5 +1078,6 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   window.addEventListener("beforeunload", () => { try{ speechSynthesis.cancel(); }catch(e){} });
 
   setPhase("idle");
+  $("verTag").textContent = "v9 · 読み込み完了";
 })();
 </script>
