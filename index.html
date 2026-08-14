@@ -328,6 +328,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   let recog = null, recogAlive = false, wantRecog = false;
   let silenceTimer = null, pendingUser = "", interimText = "";
   let priorFinals = "", curFinals = "", committing = false;
+  let netRetries = 0, lastApiError = "";
   let turns = [];               // {role:'user'|'assistant', text, at}
   let audioCtx=null, analyser=null, micStream=null, levelData=null;
   let level = 0, phaseT = 0, raf = null;
@@ -572,7 +573,13 @@ input[type=range]{width:100%;accent-color:var(--ember)}
       } else if (ev.error === "no-speech" || ev.error === "aborted"){
         /* よくあることなので黙って続ける */
       } else if (ev.error === "network"){
-        say("音声認識サービスにつながりませんでした。ネットワークをご確認ください。");
+        // 一時的なことが多いので、まず黙って一度やり直す
+        netRetries++;
+        if (netRetries <= 2){
+          setTimeout(() => { if (session && phase === "listening") startRecog(); }, 900);
+        } else if (!lastApiError){
+          say("音声認識が一時的につながりません。電波の良いところで、もう一度お試しください。");
+        }
       }
     };
 
@@ -758,6 +765,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
       }
 
       flushSpeech();
+      netRetries = 0; lastApiError = "";
       if (!full.trim()){
         turns.splice(idx,1); renderLog();
         setPhase("listening"); startRecog();
@@ -765,9 +773,10 @@ input[type=range]{width:100%;accent-color:var(--ember)}
       say("");
 
     }catch(err){
-      turns[idx].text = full || "（返答を受け取れませんでした）";
+      turns[idx].text = full || ("（返答を受け取れませんでした：" + err.message + "）");
       renderLog(); persist();
-      say("Claudeとのやり取りでつまずきました：" + err.message);
+      say((AI_LABELS[providerEl.value] || "AI") + "とのやり取りでつまずきました：" + err.message);
+      lastApiError = err.message;
       setPhase("listening");
       startRecog();
     }
@@ -834,8 +843,12 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   }
 
   /* ── 記録 ──────────────────────────────── */
+  const AI_LABELS = { gemini:"Gemini", claude:"Claude", ollama:"ローカル" };
+
   function addTurn(role, text){
-    turns.push({ role, text, at: new Date().toISOString() });
+    const t = { role, text, at: new Date().toISOString() };
+    if (role === "assistant") t.via = providerEl.value;
+    turns.push(t);
     renderLog(); persist();
     return turns.length - 1;
   }
@@ -852,7 +865,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     } else {
       logEl.innerHTML = turns.map(t => `
         <div class="turn ${t.role === "user" ? "you" : "ai"}">
-          <div class="meta"><span class="who">${t.role === "user" ? "わたし" : "Claude"}</span>${hhmm(t.at)}</div>
+          <div class="meta"><span class="who">${t.role === "user" ? "わたし" : (AI_LABELS[t.via] || AI_LABELS[providerEl.value] || "AI")}</span>${hhmm(t.at)}</div>
           <div class="said">${escapeHtml(t.text)}</div>
         </div>`).join("");
       logEl.scrollTop = logEl.scrollHeight;
@@ -869,12 +882,12 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
   }
   function asPlain(){
-    return turns.map(t => `${hhmm(t.at)} ${t.role === "user" ? "わたし" : "Claude"}\n${t.text}\n`).join("\n");
+    return turns.map(t => `${hhmm(t.at)} ${t.role === "user" ? "わたし" : (AI_LABELS[t.via] || "AI")}\n${t.text}\n`).join("\n");
   }
   function asMarkdown(){
     const d = new Date();
     return `---\ntitle: 音声対話の文字起こし\ndate: ${d.toISOString()}\nmodel: ${modelEl.value.trim()}\nturns: ${turns.length}\n---\n\n`
-      + turns.map(t => `### ${t.role === "user" ? "わたし" : "Claude"} — ${hhmm(t.at)}\n\n${t.text}\n`).join("\n");
+      + turns.map(t => `### ${t.role === "user" ? "わたし" : (AI_LABELS[t.via] || "AI")} — ${hhmm(t.at)}\n\n${t.text}\n`).join("\n");
   }
   function download(name, text, type){
     const blob = new Blob([text], { type });
@@ -920,7 +933,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     btnStart.disabled = true;
     btnStop.disabled = false;
     pendingUser = ""; interimText = ""; priorFinals = ""; curFinals = "";
-    committing = false; live.textContent = "";
+    committing = false; netRetries = 0; lastApiError = ""; live.textContent = "";
     await openMeter();
 
     // スマホは「画面に触れた瞬間」でないと読み上げが解錠されないので、ここで一度鳴らす
