@@ -249,7 +249,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
           </div>
           <div>
             <label for="voiceSel">読み上げる声</label>
-            <select id="voiceSel"><option>読み込み中…</option></select>
+            <select id="voiceSel"><option value="auto">自動（端末におまかせ）</option></select>
           </div>
         </div>
         <div>
@@ -262,6 +262,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
           <p class="hint">声のやり取りなので、短く区切って話すよう指示しておくと自然になります。</p>
         </div>
         <div>
+          <button class="chip" id="btnTestVoice">声を試す</button>
           <button class="chip" id="btnResetSys">相手役の設定を初期に戻す</button>
           <button class="chip danger" id="btnForgetKey">キーを消す</button>
         </div>
@@ -328,7 +329,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   let recog = null, recogAlive = false, wantRecog = false;
   let silenceTimer = null, pendingUser = "", interimText = "";
   let priorFinals = "", curFinals = "", committing = false;
-  let netRetries = 0, lastApiError = "";
+  let netRetries = 0, lastApiError = "", resumeTimer = null;
   let turns = [];               // {role:'user'|'assistant', text, at}
   let audioCtx=null, analyser=null, micStream=null, levelData=null;
   let level = 0, phaseT = 0, raf = null;
@@ -413,6 +414,20 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   applyProvider(false);
   sysEl.addEventListener("change", () => store.set("vc.sys", sysEl.value));
   rateEl.addEventListener("input", () => { rateVal.textContent = rateEl.value; store.set("vc.rate", rateEl.value); });
+  $("btnTestVoice").addEventListener("click", () => {
+    if (!window.speechSynthesis){ say("この端末は読み上げに対応していません。"); return; }
+    try{
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance("こんにちは。この声で読み上げます。");
+      const v = pickVoice();
+      if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "ja-JP"; }
+      u.rate = parseFloat(rateEl.value) || 1;
+      u.onerror = () => say("読み上げがうまく動きませんでした。端末の音声設定をご確認ください。");
+      speechSynthesis.speak(u);
+      say("聞こえない場合は、マナーモードとメディア音量をご確認ください。");
+    }catch(e){ say("読み上げを開始できませんでした。"); }
+  });
+
   $("btnResetSys").addEventListener("click", () => {
     sysEl.value = DEFAULT_SYS;
     store.set("vc.sys", DEFAULT_SYS);
@@ -443,25 +458,57 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   })();
 
   /* ── 声の一覧 ──────────────────────────── */
+  let voiceTries = 0;
+
+  // 「自動」でも端末任せにせず、一覧の先頭（＝Googleの声）を指名する
+  function pickVoice(){
+    if (voiceSel.value !== "auto") return voices[Number(voiceSel.value)] || voices[0] || null;
+    return voices[0] || null;
+  }
+
   function loadVoices(){
-    if (!window.speechSynthesis) return;
-    voices = speechSynthesis.getVoices().filter(v => /^ja/i.test(v.lang));
-    if (!voices.length) voices = speechSynthesis.getVoices();
-    const saved = store.get("vc.voice", "");
-    voiceSel.innerHTML = "";
-    if (!voices.length){ voiceSel.innerHTML = "<option>（見つかりません）</option>"; return; }
+    if (!window.speechSynthesis){
+      voiceSel.innerHTML = '<option value="auto">この端末は読み上げに対応していません</option>';
+      return;
+    }
+    let all = [];
+    try { all = speechSynthesis.getVoices() || []; } catch(e){ all = []; }
+
+    // Google の読み上げだけに絞る（Microsoft などは候補から外す）
+    const isGoogle = v => /google/i.test(v.name || "") || /google/i.test(v.voiceURI || "");
+    const google = all.filter(isGoogle);
+    const googleJa = google.filter(v => /^ja/i.test(v.lang));
+    const anyJa = all.filter(v => /^ja/i.test(v.lang));
+
+    let fallbackNote = "";
+    if (googleJa.length)      voices = googleJa;
+    else if (google.length)   voices = google;
+    else if (anyJa.length)  { voices = anyJa;  fallbackNote = "Googleの声が見つからないため、端末にある日本語の声を表示しています。"; }
+    else                    { voices = all;    fallbackNote = all.length ? "Googleの声が見つかりませんでした。" : ""; }
+
+    const saved = store.get("vc.voice", "auto");
+    voiceSel.innerHTML = '<option value="auto">自動（Googleの声から選ぶ）</option>';
     voices.forEach((v,i) => {
       const o = document.createElement("option");
-      o.value = i; o.textContent = `${v.name}（${v.lang}）`;
+      o.value = String(i);
+      o.textContent = `${v.name}（${v.lang}）`;
       if (v.name === saved) o.selected = true;
       voiceSel.appendChild(o);
     });
+    if (fallbackNote && voices.length) say(fallbackNote);
+
+    // Android は一覧が遅れて届くので、しばらく待って取り直す
+    if (!voices.length && voiceTries < 12){
+      voiceTries++;
+      setTimeout(loadVoices, 400);
+    }
   }
+
   loadVoices();
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
   voiceSel.addEventListener("change", () => {
     const v = voices[Number(voiceSel.value)];
-    if (v) store.set("vc.voice", v.name);
+    store.set("vc.voice", v ? v.name : "auto");
   });
 
   /* ── 画面の表情 ────────────────────────── */
@@ -834,12 +881,20 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     setPhase("speaking");
     stopRecog();                       // 自分の声を聞き返さないように
     const u = new SpeechSynthesisUtterance(text);
-    const v = voices[Number(voiceSel.value)];
+    const v = pickVoice();
     if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "ja-JP"; }
     u.rate = parseFloat(rateEl.value) || 1;
     u.onend = () => nextSpeech();
     u.onerror = () => nextSpeech();
-    try { speechSynthesis.speak(u); } catch(e){ nextSpeech(); }
+    try {
+      speechSynthesis.speak(u);
+      // Chrome は長い読み上げを途中で止めてしまうことがあるので、つつき続ける
+      clearInterval(resumeTimer);
+      resumeTimer = setInterval(() => {
+        if (!speaking){ clearInterval(resumeTimer); return; }
+        try { if (speechSynthesis.paused) speechSynthesis.resume(); } catch(e){}
+      }, 4000);
+    } catch(e){ nextSpeech(); }
   }
 
   /* ── 記録 ──────────────────────────────── */
@@ -936,15 +991,6 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     committing = false; netRetries = 0; lastApiError = ""; live.textContent = "";
     await openMeter();
 
-    // スマホは「画面に触れた瞬間」でないと読み上げが解錠されないので、ここで一度鳴らす
-    if (window.speechSynthesis){
-      speechSynthesis.cancel();
-      try{
-        const wake = new SpeechSynthesisUtterance(" ");
-        wake.volume = 0; wake.lang = "ja-JP";
-        speechSynthesis.speak(wake);
-      }catch(e){}
-    }
     // 話している間に画面が消えないように
     try{
       if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
@@ -972,7 +1018,18 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     persist();
   }
 
-  btnStart.addEventListener("click", startSession);
+  // Android は「指が触れたその瞬間」でないと読み上げが解錠されないので、await より前に鳴らす
+  function unlockSpeech(){
+    if (!window.speechSynthesis) return;
+    try{
+      speechSynthesis.cancel();
+      const wake = new SpeechSynthesisUtterance("　");
+      wake.volume = 0; wake.lang = "ja-JP";
+      speechSynthesis.speak(wake);
+    }catch(e){}
+  }
+
+  btnStart.addEventListener("click", () => { unlockSpeech(); loadVoices(); startSession(); });
   btnStop.addEventListener("click", endSession);
 
   // スマホで画面を消して戻ってきたときの復帰
