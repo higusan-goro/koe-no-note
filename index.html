@@ -240,7 +240,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
         <div id="keyRow">
           <label for="apiKey"><span id="keyLabel">APIキー</span></label>
           <input type="password" id="apiKey" placeholder="" autocomplete="off" spellcheck="false">
-          <p class="hint">このブラウザの中だけに保存され、選んだ提供元以外のどこにも送られません。共用のパソコンでは「キーを消す」でお引き取りください。</p>
+          <p class="hint" id="keyHint">このブラウザの中だけに保存され、選んだ提供元以外のどこにも送られません。共用のパソコンでは「キーを消す」でお引き取りください。</p>
         </div>
         <div class="two">
           <div>
@@ -262,6 +262,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
           <p class="hint">声のやり取りなので、短く区切って話すよう指示しておくと自然になります。</p>
         </div>
         <div>
+          <button class="chip" id="btnResetSys">相手役の設定を初期に戻す</button>
           <button class="chip danger" id="btnForgetKey">キーを消す</button>
         </div>
       </div>
@@ -295,8 +296,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
 
   /* ── 既定のシステムプロンプト ───────────────── */
   const DEFAULT_SYS = `あなたは音声で会話する相手役です。返答はそのまま読み上げられます。
-
-・一度の返答は2〜4文まで。長い説明は区切って、続きを聞かれてから話す
+・1回の文量を増やして、意見や要約をしっかり伝える設定。文の途中で改行を入れず、文末まで一続きで出力してください
 ・箇条書き、記号、見出し、絵文字は使わない。話し言葉で書く
 ・URLやコードは読み上げに向かないので、必要なときは「あとで文字起こしに残しますね」と伝えるだけにする
 ・聞き取りが曖昧なときは、決めつけずに短く聞き返す
@@ -330,7 +330,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   let turns = [];               // {role:'user'|'assistant', text, at}
   let audioCtx=null, analyser=null, micStream=null, levelData=null;
   let level = 0, phaseT = 0, raf = null;
-  let voices = [], speaking = false, speakQueue = [], sentenceBuf = "";
+  let voices = [], speaking = false, speakQueue = [], sentenceBuf = "", speakGroup = "";
 
   const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const SILENCE_MS = IS_MOBILE ? 1600 : 1300;   // スマホは認識が届くまで少し遅い
@@ -376,6 +376,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     }
     modelTag.textContent = modelEl.value.trim() || "—";
     store.set("vc.provider", providerEl.value);
+    markKey();
   }
 
   providerEl.value = store.get("vc.provider", "gemini");
@@ -388,13 +389,34 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   try { turns = JSON.parse(store.get("vc.turns", "[]")) || []; } catch(e){ turns = []; }
   renderLog();
 
+  const KEY_HINT = "このブラウザの中だけに保存され、選んだ提供元以外のどこにも送られません。共用のパソコンでは「キーを消す」でお引き取りください。";
+
+  function markKey(){
+    const hint = $("keyHint");
+    const has = apiKeyEl.value.trim().length > 0;
+    let stored = false;
+    try { stored = !!store.get("vc.key." + providerEl.value, ""); } catch(e){}
+    hint.textContent = (has && stored)
+      ? "この端末に保存しました。次からは入れ直さずに使えます。" + KEY_HINT
+      : KEY_HINT;
+    hint.style.color = (has && stored) ? "var(--celadon)" : "";
+  }
+
   providerEl.addEventListener("change", () => applyProvider(true));
-  apiKeyEl.addEventListener("change", () => store.set("vc.key." + providerEl.value, apiKeyEl.value.trim()));
+  apiKeyEl.addEventListener("input", () => {
+    store.set("vc.key." + providerEl.value, apiKeyEl.value.trim());
+    markKey();
+  });
   modelEl.addEventListener("input", () => { store.set("vc.model." + providerEl.value, modelEl.value.trim()); modelTag.textContent = modelEl.value.trim() || "—"; });
   applyProvider(false);
   sysEl.addEventListener("change", () => store.set("vc.sys", sysEl.value));
   rateEl.addEventListener("input", () => { rateVal.textContent = rateEl.value; store.set("vc.rate", rateEl.value); });
-  $("btnForgetKey").addEventListener("click", () => { store.del("vc.key." + providerEl.value); apiKeyEl.value=""; say("APIキーを消しました。"); });
+  $("btnResetSys").addEventListener("click", () => {
+    sysEl.value = DEFAULT_SYS;
+    store.set("vc.sys", DEFAULT_SYS);
+    say("相手役の設定を初期に戻しました。");
+  });
+  $("btnForgetKey").addEventListener("click", () => { store.del("vc.key." + providerEl.value); apiKeyEl.value=""; markKey(); say("APIキーを消しました。"); });
 
   /* ── 対応状況の確認 ─────────────────────── */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -407,6 +429,16 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   }
 
   function say(msg){ notice.textContent = msg || ""; }
+
+  // シークレットモードなどで記憶できない環境を早めに知らせる
+  (function checkStore(){
+    try{
+      localStorage.setItem("vc.probe","1");
+      localStorage.removeItem("vc.probe");
+    }catch(e){
+      say("このブラウザでは設定を記憶できません。シークレットモードの場合は、通常のタブで開いてください。");
+    }
+  })();
 
   /* ── 声の一覧 ──────────────────────────── */
   function loadVoices(){
@@ -596,7 +628,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
             role: t.role === "user" ? "user" : "model",
             parts: [{ text: t.text }]
           })),
-          generationConfig: { maxOutputTokens: 1024, temperature: 0.9 }
+          generationConfig: { maxOutputTokens: 2048, temperature: 0.9 }
         },
         format: "sse-gemini"
       };
@@ -612,7 +644,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: {
-          model, max_tokens: 1024, stream: true,
+          model, max_tokens: 2048, stream: true,
           system: sysText(),
           messages: history.map(t => ({ role: t.role, content: t.text }))
         },
@@ -665,7 +697,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
 
     setPhase("thinking");
     stopRecog();
-    sentenceBuf = "";
+    sentenceBuf = ""; speakGroup = "";
     let full = "";
     const idx = addTurn("assistant", "");
 
@@ -729,16 +761,37 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   }
 
   /* ── 読み上げ ──────────────────────────── */
+  // 読み上げ用に整える。改行は文の切れ目にせず、ひと続きにつなぐ
+  function forSpeech(s){
+    return String(s)
+      .replace(/[*_`#>|~]/g, "")
+      .replace(/\s*\n+\s*/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .trim();
+  }
+
   function feedSpeech(chunk){
     if (!window.speechSynthesis) return;
     sentenceBuf += chunk;
-    const parts = sentenceBuf.split(/(?<=[。！？!?\n])/);
+    const parts = sentenceBuf.split(/(?<=[。！？!?])/);   // 句点でだけ区切る
     sentenceBuf = parts.pop() || "";
-    parts.forEach(p => { if (p.trim()) enqueueSpeech(p.trim()); });
+    for (const p of parts){
+      const s = forSpeech(p);
+      if (!s) continue;
+      speakGroup += s;
+      // 最初のひと声は早めに、そのあとは長めにまとめて途切れを減らす
+      const threshold = (speaking || speakQueue.length) ? 60 : 18;
+      if (speakGroup.length >= threshold){
+        enqueueSpeech(speakGroup);
+        speakGroup = "";
+      }
+    }
   }
+
   function flushSpeech(){
-    if (sentenceBuf.trim()) enqueueSpeech(sentenceBuf.trim());
-    sentenceBuf = "";
+    const tail = forSpeech(speakGroup + sentenceBuf);
+    speakGroup = ""; sentenceBuf = "";
+    if (tail) enqueueSpeech(tail);
     if (!speaking && !speakQueue.length && session){ setPhase("listening"); startRecog(); }
   }
   function enqueueSpeech(text){
@@ -762,9 +815,9 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     const v = voices[Number(voiceSel.value)];
     if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "ja-JP"; }
     u.rate = parseFloat(rateEl.value) || 1;
-    u.onend = () => setTimeout(nextSpeech, 60);
-    u.onerror = () => setTimeout(nextSpeech, 60);
-    try { speechSynthesis.speak(u); } catch(e){ setTimeout(nextSpeech, 60); }
+    u.onend = () => nextSpeech();
+    u.onerror = () => nextSpeech();
+    try { speechSynthesis.speak(u); } catch(e){ nextSpeech(); }
   }
 
   /* ── 記録 ──────────────────────────────── */
@@ -879,7 +932,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     session = false;
     clearTimeout(silenceTimer);
     stopRecog();
-    speakQueue = []; speaking = false; sentenceBuf = "";
+    speakQueue = []; speaking = false; sentenceBuf = ""; speakGroup = "";
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch(e){}
     closeMeter();
     try{ wakeLock && wakeLock.release(); }catch(e){}
