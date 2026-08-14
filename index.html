@@ -197,7 +197,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     <header class="masthead">
       <h1 class="title">こえのノート</h1>
       <span class="model-tag" id="modelTag">gemini-3.5-flash</span>
-      <span class="model-tag" id="verTag">v9</span>
+      <span class="model-tag" id="verTag">v10</span>
     </header>
 
     <div class="center">
@@ -324,6 +324,8 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     del(k){ try{ localStorage.removeItem(k); }catch(e){} }
   };
 
+  const AI_LABELS = { gemini:"Gemini", claude:"Claude", ollama:"ローカル" };
+
   /* ── 状態 ──────────────────────────────── */
   let session = false;          // 「はじめる」〜「おわる」の間だけ true
   let phase = "idle";           // idle | listening | thinking | speaking
@@ -391,7 +393,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   rateVal.textContent = rateEl.value;
   modelTag.textContent = modelEl.value;
   try { turns = JSON.parse(store.get("vc.turns", "[]")) || []; } catch(e){ turns = []; }
-  renderLog();
+  try { renderLog(); } catch(e){ turns = []; renderLog(); }
 
   const KEY_HINT = "このブラウザの中だけに保存され、選んだ提供元以外のどこにも送られません。共用のパソコンでは「キーを消す」でお引き取りください。";
 
@@ -919,8 +921,6 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   }
 
   /* ── 記録 ──────────────────────────────── */
-  const AI_LABELS = { gemini:"Gemini", claude:"Claude", ollama:"ローカル" };
-
   function addTurn(role, text){
     const t = { role, text, at: new Date().toISOString() };
     if (role === "assistant") t.via = providerEl.value;
@@ -1078,6 +1078,6 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   window.addEventListener("beforeunload", () => { try{ speechSynthesis.cancel(); }catch(e){} });
 
   setPhase("idle");
-  $("verTag").textContent = "v9 · 読み込み完了";
+  $("verTag").textContent = "v10 · 読み込み完了";
 })();
 </script>
