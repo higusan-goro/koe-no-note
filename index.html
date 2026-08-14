@@ -1,0 +1,909 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#131C1B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>こえのノート — 音声対話と文字起こし</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --glaze-deep:#131C1B;
+  --glaze:#1C2827;
+  --glaze-up:#243230;
+  --milk:#E9E2D4;
+  --milk-dim:rgba(233,226,212,.52);
+  --milk-faint:rgba(233,226,212,.24);
+  --rim:rgba(233,226,212,.12);
+  --ember:#D9A441;
+  --celadon:#7FB3A4;
+  --alert:#D2705C;
+  --display:"Zen Old Mincho",serif;
+  --body:"Zen Kaku Gothic New",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,"Noto Sans Mono",monospace;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:
+    radial-gradient(120% 80% at 50% -10%, #24322F 0%, transparent 60%),
+    var(--glaze-deep);
+  color:var(--milk);
+  font-family:var(--body);
+  font-size:15px;
+  line-height:1.85;
+  -webkit-font-smoothing:antialiased;
+}
+
+.wrap{
+  min-height:100%;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:0;
+}
+@media (max-width:900px){ .wrap{grid-template-columns:1fr} }
+
+/* ── 左：対話の場 ───────────────────────────── */
+.stage{
+  display:flex; flex-direction:column;
+  padding:28px 32px 32px;
+  min-height:100vh;
+  border-right:1px solid var(--rim);
+}
+@media (max-width:900px){ .stage{min-height:auto;border-right:none;border-bottom:1px solid var(--rim)} }
+
+.masthead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.title{
+  font-family:var(--display); font-weight:600;
+  font-size:19px; letter-spacing:.14em; margin:0;
+}
+.model-tag{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.08em;
+  color:var(--milk-dim); border:1px solid var(--rim);
+  padding:2px 8px; border-radius:2px;
+}
+
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:36px 0}
+
+.ring-holder{position:relative;width:250px;height:250px}
+.ring-holder svg{width:100%;height:100%;display:block}
+.ring-holder .halo{
+  position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle, rgba(217,164,65,.16) 0%, transparent 62%);
+  opacity:0;transition:opacity .6s ease;pointer-events:none;
+}
+.ring-holder.on .halo{opacity:1}
+.ring-holder.speak .halo{background:radial-gradient(circle, rgba(127,179,164,.18) 0%, transparent 62%);opacity:1}
+
+.state-line{text-align:center}
+.state-word{
+  font-family:var(--display); font-size:22px; letter-spacing:.2em;
+  margin:0 0 6px;
+}
+.state-note{font-size:12.5px;color:var(--milk-dim);margin:0;min-height:1.9em;letter-spacing:.04em}
+
+.live{
+  max-width:520px;text-align:center;font-size:14px;color:var(--milk-dim);
+  min-height:2.6em;letter-spacing:.02em;
+}
+.live b{color:var(--milk);font-weight:400}
+
+/* ── 二つのボタン ─────────────────────────── */
+.controls{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+button{font-family:var(--body);cursor:pointer}
+.key{
+  appearance:none;border:1px solid var(--rim);
+  background:var(--glaze); color:var(--milk);
+  font-size:15px; letter-spacing:.18em;
+  padding:15px 42px; border-radius:999px;
+  transition:background .18s ease,border-color .18s ease,transform .12s ease,opacity .18s ease;
+}
+.key:hover:not(:disabled){background:var(--glaze-up);border-color:var(--milk-faint)}
+.key:active:not(:disabled){transform:translateY(1px)}
+.key:focus-visible{outline:2px solid var(--ember);outline-offset:3px}
+.key:disabled{opacity:.28;cursor:not-allowed}
+.key.start{border-color:rgba(217,164,65,.45);color:#F0D9A4}
+.key.start:hover:not(:disabled){background:rgba(217,164,65,.1)}
+.key.stop{border-color:rgba(210,112,92,.4);color:#EDB1A2}
+.key.stop:hover:not(:disabled){background:rgba(210,112,92,.1)}
+
+.notice{
+  font-size:12.5px;color:var(--alert);text-align:center;
+  max-width:520px;margin:0 auto;min-height:1.6em;
+}
+
+/* ── 設定 ─────────────────────────────────── */
+details.settings{border-top:1px solid var(--rim);padding-top:16px;margin-top:8px}
+details.settings summary{
+  list-style:none;cursor:pointer;font-size:12px;letter-spacing:.16em;
+  color:var(--milk-dim);user-select:none;
+}
+details.settings summary::-webkit-details-marker{display:none}
+details.settings summary:hover{color:var(--milk)}
+.fields{display:grid;gap:14px;margin-top:16px}
+label{display:block;font-size:11.5px;letter-spacing:.1em;color:var(--milk-dim);margin-bottom:6px}
+input[type=text],input[type=password],textarea,select{
+  width:100%;background:var(--glaze);color:var(--milk);
+  border:1px solid var(--rim);border-radius:3px;
+  padding:10px 12px;font-family:var(--body);font-size:13.5px;line-height:1.7;
+}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--milk-faint)}
+textarea{resize:vertical;min-height:96px}
+input[type=range]{width:100%;accent-color:var(--ember)}
+.hint{font-size:11.5px;color:var(--milk-faint);margin:6px 0 0;line-height:1.7}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:520px){ .two{grid-template-columns:1fr} }
+
+/* ── 右：文字起こし ────────────────────────── */
+.record{display:flex;flex-direction:column;min-height:100vh;max-height:100vh}
+@media (max-width:900px){ .record{min-height:auto;max-height:none} }
+
+.record-head{
+  padding:28px 32px 16px;border-bottom:1px solid var(--rim);
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;
+}
+.record-head h2{font-family:var(--display);font-size:15px;letter-spacing:.18em;margin:0;font-weight:400}
+.count{font-family:var(--mono);font-size:11px;color:var(--milk-faint);letter-spacing:.06em}
+
+.log{flex:1;overflow-y:auto;padding:24px 32px 8px;scroll-behavior:smooth}
+.empty{color:var(--milk-faint);font-size:13px;line-height:2;letter-spacing:.03em}
+
+.turn{display:grid;grid-template-columns:76px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid rgba(233,226,212,.06)}
+.turn .meta{font-family:var(--mono);font-size:10.5px;line-height:2.1;color:var(--milk-faint);letter-spacing:.04em}
+.turn .who{display:block;letter-spacing:.14em}
+.turn.you .who{color:var(--ember)}
+.turn.ai .who{color:var(--celadon)}
+.turn .said{font-size:14px;white-space:pre-wrap;word-break:break-word}
+
+.record-foot{padding:16px 32px 28px;border-top:1px solid var(--rim);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.chip{
+  appearance:none;background:transparent;border:1px solid var(--rim);
+  color:var(--milk-dim);font-size:12px;letter-spacing:.1em;
+  padding:8px 16px;border-radius:999px;transition:.18s ease;
+}
+.chip:hover:not(:disabled){color:var(--milk);border-color:var(--milk-faint);background:var(--glaze)}
+.chip:focus-visible{outline:2px solid var(--celadon);outline-offset:2px}
+.chip:disabled{opacity:.28;cursor:not-allowed}
+.chip.danger:hover:not(:disabled){color:#EDB1A2;border-color:rgba(210,112,92,.4)}
+.saved{font-family:var(--mono);font-size:11px;color:var(--celadon);opacity:0;transition:opacity .3s ease}
+.saved.show{opacity:1}
+
+@media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
+
+/* ── スマホ ───────────────────────────── */
+@media (max-width:900px){
+  .stage{padding:20px 20px 24px}
+  .record-head,.record-foot{padding-left:20px;padding-right:20px}
+  .log{padding:18px 20px 8px;max-height:46vh}
+  .center{padding:20px 0;gap:20px}
+  .ring-holder{width:190px;height:190px}
+  .state-word{font-size:19px}
+  .controls{position:sticky;bottom:0;padding:12px 0 calc(8px + env(safe-area-inset-bottom));
+            background:linear-gradient(to top, var(--glaze-deep) 60%, transparent);}
+  .key{flex:1;min-width:0;padding:17px 20px;font-size:16px;letter-spacing:.12em}
+  .turn{grid-template-columns:64px 1fr;gap:12px}
+}
+</style>
+
+<div class="wrap">
+
+  <!-- 対話の場 -->
+  <section class="stage">
+    <header class="masthead">
+      <h1 class="title">こえのノート</h1>
+      <span class="model-tag" id="modelTag">claude-sonnet-5</span>
+    </header>
+
+    <div class="center">
+      <div class="ring-holder" id="ringHolder">
+        <div class="halo"></div>
+        <svg viewBox="0 0 250 250" aria-hidden="true">
+          <circle cx="125" cy="125" r="106" fill="none" stroke="rgba(233,226,212,.10)" stroke-width="1"/>
+          <circle id="rippleA" cx="125" cy="125" r="80" fill="none" stroke="rgba(233,226,212,.10)" stroke-width="1" opacity="0"/>
+          <circle id="rippleB" cx="125" cy="125" r="80" fill="none" stroke="rgba(233,226,212,.10)" stroke-width="1" opacity="0"/>
+          <circle id="surface" cx="125" cy="125" r="62" fill="rgba(233,226,212,.05)" stroke="rgba(233,226,212,.28)" stroke-width="1.2"/>
+          <circle id="core" cx="125" cy="125" r="5" fill="var(--milk-faint)"/>
+        </svg>
+      </div>
+
+      <div class="state-line">
+        <p class="state-word" id="stateWord">はじめましょう</p>
+        <p class="state-note" id="stateNote">「はじめる」を押すと、あとは声だけで進みます</p>
+      </div>
+
+      <p class="live" id="live"></p>
+    </div>
+
+    <div class="controls">
+      <button class="key start" id="btnStart">はじめる</button>
+      <button class="key stop" id="btnStop" disabled>おわる</button>
+    </div>
+    <p class="notice" id="notice"></p>
+
+    <details class="settings">
+      <summary>設定をひらく</summary>
+      <div class="fields">
+        <div>
+          <label for="provider">どこの頭を借りるか</label>
+          <select id="provider">
+            <option value="gemini">Gemini — 無料枠あり・カード登録なし</option>
+            <option value="claude">Claude — 従量課金・要クレジット</option>
+            <option value="ollama">ローカル（Ollama）— 無料・外に出ない</option>
+          </select>
+          <p class="hint" id="providerHint"></p>
+        </div>
+        <div id="keyRow">
+          <label for="apiKey"><span id="keyLabel">APIキー</span></label>
+          <input type="password" id="apiKey" placeholder="" autocomplete="off" spellcheck="false">
+          <p class="hint">このブラウザの中だけに保存され、選んだ提供元以外のどこにも送られません。共用のパソコンでは「キーを消す」でお引き取りください。</p>
+        </div>
+        <div class="two">
+          <div>
+            <label for="model">モデル</label>
+            <input type="text" id="model" value="gemini-3.5-flash" spellcheck="false">
+          </div>
+          <div>
+            <label for="voiceSel">読み上げる声</label>
+            <select id="voiceSel"><option>読み込み中…</option></select>
+          </div>
+        </div>
+        <div>
+          <label for="rate">話す速さ <span id="rateVal" style="font-family:var(--mono)">1.05</span></label>
+          <input type="range" id="rate" min="0.7" max="1.6" step="0.05" value="1.05">
+        </div>
+        <div>
+          <label for="sysPrompt">相手役の設定（システムプロンプト）</label>
+          <textarea id="sysPrompt"></textarea>
+          <p class="hint">声のやり取りなので、短く区切って話すよう指示しておくと自然になります。</p>
+        </div>
+        <div>
+          <button class="chip danger" id="btnForgetKey">キーを消す</button>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- 文字起こし -->
+  <section class="record">
+    <div class="record-head">
+      <h2>文字起こし</h2>
+      <span class="count" id="count">0 turns</span>
+    </div>
+    <div class="log" id="log">
+      <p class="empty">まだ何もありません。<br>話しはじめると、ここに一言ずつ積もっていきます。</p>
+    </div>
+    <div class="record-foot">
+      <button class="chip" id="btnCopy" disabled>本文をコピー</button>
+      <button class="chip" id="btnMd" disabled>.md で保存</button>
+      <button class="chip" id="btnTxt" disabled>.txt で保存</button>
+      <button class="chip" id="btnJson" disabled>.json で保存</button>
+      <button class="chip danger" id="btnClear" disabled>消す</button>
+      <span class="saved" id="savedFlag">保存しました</span>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ── 既定のシステムプロンプト ───────────────── */
+  const DEFAULT_SYS = `あなたは音声で会話する相手役です。返答はそのまま読み上げられます。
+
+・一度の返答は2〜4文まで。長い説明は区切って、続きを聞かれてから話す
+・箇条書き、記号、見出し、絵文字は使わない。話し言葉で書く
+・URLやコードは読み上げに向かないので、必要なときは「あとで文字起こしに残しますね」と伝えるだけにする
+・聞き取りが曖昧なときは、決めつけずに短く聞き返す
+・相づちだけで終わらせず、話が前に進む一言を添える`;
+
+  /* ── 要素 ──────────────────────────────── */
+  const $ = id => document.getElementById(id);
+  const btnStart=$("btnStart"), btnStop=$("btnStop"), notice=$("notice"),
+        stateWord=$("stateWord"), stateNote=$("stateNote"), live=$("live"),
+        ringHolder=$("ringHolder"), surface=$("surface"), core=$("core"),
+        rippleA=$("rippleA"), rippleB=$("rippleB"),
+        logEl=$("log"), countEl=$("count"), savedFlag=$("savedFlag"),
+        apiKeyEl=$("apiKey"), modelEl=$("model"), modelTag=$("modelTag"),
+        providerEl=$("provider"), providerHint=$("providerHint"),
+        keyRow=$("keyRow"), keyLabel=$("keyLabel"),
+        voiceSel=$("voiceSel"), rateEl=$("rate"), rateVal=$("rateVal"),
+        sysEl=$("sysPrompt");
+
+  /* ── 保管（使えない環境では黙って諦める）──── */
+  const store = {
+    get(k, fb){ try{ const v=localStorage.getItem(k); return v===null?fb:v; }catch(e){ return fb; } },
+    set(k, v){ try{ localStorage.setItem(k, v); }catch(e){} },
+    del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+  };
+
+  /* ── 状態 ──────────────────────────────── */
+  let session = false;          // 「はじめる」〜「おわる」の間だけ true
+  let phase = "idle";           // idle | listening | thinking | speaking
+  let recog = null, recogAlive = false, wantRecog = false;
+  let silenceTimer = null, pendingUser = "", interimText = "";
+  let turns = [];               // {role:'user'|'assistant', text, at}
+  let audioCtx=null, analyser=null, micStream=null, levelData=null;
+  let level = 0, phaseT = 0, raf = null;
+  let voices = [], speaking = false, speakQueue = [], sentenceBuf = "";
+
+  const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const SILENCE_MS = IS_MOBILE ? 1600 : 1300;   // スマホは認識が届くまで少し遅い
+  const RESUME_MS  = IS_MOBILE ? 450 : 120;     // スピーカーの残響を拾わないための間
+  let wakeLock = null;
+
+  /* ── 初期値の復元 ───────────────────────── */
+  const PROVIDERS = {
+    gemini: {
+      keyLabel: "Google AI Studio のAPIキー",
+      placeholder: "AIza...",
+      model: "gemini-3.5-flash",
+      needsKey: true,
+      hint: "aistudio.google.com/apikey で無料で発行できます。カードの登録は要りません。無料枠では、話した内容がGoogleの製品改善に使われることがあります。"
+    },
+    claude: {
+      keyLabel: "Anthropic のAPIキー",
+      placeholder: "sk-ant-...",
+      model: "claude-sonnet-5",
+      needsKey: true,
+      hint: "console.anthropic.com で発行します。前払いのクレジットが必要なかわり、内容が学習に使われることはありません。"
+    },
+    ollama: {
+      keyLabel: "",
+      placeholder: "",
+      model: "qwen3:8b",
+      needsKey: false,
+      hint: "お手元で ollama serve が動いている必要があります。ブラウザから届くよう、起動前に OLLAMA_ORIGINS=\"*\" を設定してください。声も文字もこのパソコンの外に出ません。"
+    }
+  };
+
+  function pconf(){ return PROVIDERS[providerEl.value] || PROVIDERS.gemini; }
+
+  function applyProvider(changed){
+    const c = pconf();
+    providerHint.textContent = c.hint;
+    keyRow.style.display = c.needsKey ? "" : "none";
+    keyLabel.textContent = c.keyLabel;
+    apiKeyEl.placeholder = c.placeholder;
+    if (changed){
+      apiKeyEl.value = store.get("vc.key." + providerEl.value, "");
+      modelEl.value = store.get("vc.model." + providerEl.value, c.model);
+    }
+    modelTag.textContent = modelEl.value.trim() || "—";
+    store.set("vc.provider", providerEl.value);
+  }
+
+  providerEl.value = store.get("vc.provider", "gemini");
+  apiKeyEl.value = store.get("vc.key." + providerEl.value, "");
+  modelEl.value  = store.get("vc.model." + providerEl.value, pconf().model);
+  rateEl.value   = store.get("vc.rate", "1.05");
+  sysEl.value    = store.get("vc.sys", DEFAULT_SYS);
+  rateVal.textContent = rateEl.value;
+  modelTag.textContent = modelEl.value;
+  try { turns = JSON.parse(store.get("vc.turns", "[]")) || []; } catch(e){ turns = []; }
+  renderLog();
+
+  providerEl.addEventListener("change", () => applyProvider(true));
+  apiKeyEl.addEventListener("change", () => store.set("vc.key." + providerEl.value, apiKeyEl.value.trim()));
+  modelEl.addEventListener("input", () => { store.set("vc.model." + providerEl.value, modelEl.value.trim()); modelTag.textContent = modelEl.value.trim() || "—"; });
+  applyProvider(false);
+  sysEl.addEventListener("change", () => store.set("vc.sys", sysEl.value));
+  rateEl.addEventListener("input", () => { rateVal.textContent = rateEl.value; store.set("vc.rate", rateEl.value); });
+  $("btnForgetKey").addEventListener("click", () => { store.del("vc.key." + providerEl.value); apiKeyEl.value=""; say("APIキーを消しました。"); });
+
+  /* ── 対応状況の確認 ─────────────────────── */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    btnStart.disabled = true;
+    say("このブラウザは音声認識に対応していません。パソコンの Google Chrome か Microsoft Edge でひらいてください。");
+  }
+  if (!window.speechSynthesis) {
+    say("このブラウザは読み上げに対応していません。文字起こしは残せますが、返答は音になりません。");
+  }
+
+  function say(msg){ notice.textContent = msg || ""; }
+
+  /* ── 声の一覧 ──────────────────────────── */
+  function loadVoices(){
+    if (!window.speechSynthesis) return;
+    voices = speechSynthesis.getVoices().filter(v => /^ja/i.test(v.lang));
+    if (!voices.length) voices = speechSynthesis.getVoices();
+    const saved = store.get("vc.voice", "");
+    voiceSel.innerHTML = "";
+    if (!voices.length){ voiceSel.innerHTML = "<option>（見つかりません）</option>"; return; }
+    voices.forEach((v,i) => {
+      const o = document.createElement("option");
+      o.value = i; o.textContent = `${v.name}（${v.lang}）`;
+      if (v.name === saved) o.selected = true;
+      voiceSel.appendChild(o);
+    });
+  }
+  loadVoices();
+  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
+  voiceSel.addEventListener("change", () => {
+    const v = voices[Number(voiceSel.value)];
+    if (v) store.set("vc.voice", v.name);
+  });
+
+  /* ── 画面の表情 ────────────────────────── */
+  const PHASES = {
+    idle:      { word:"はじめましょう", note:"「はじめる」を押すと、あとは声だけで進みます" },
+    listening: { word:"聞いています",   note:"ひと呼吸おくと、そこで区切って受け取ります" },
+    thinking:  { word:"考えています",   note:"少しだけお待ちください" },
+    speaking:  { word:"話しています",   note:"話し終えると、また聞く側にもどります" }
+  };
+  function setPhase(p){
+    phase = p;
+    stateWord.textContent = PHASES[p].word;
+    stateNote.textContent = PHASES[p].note;
+    ringHolder.classList.toggle("on", p === "listening");
+    ringHolder.classList.toggle("speak", p === "speaking");
+  }
+
+  function animate(ts){
+    phaseT = ts / 1000;
+    if (analyser && phase === "listening"){
+      analyser.getByteTimeDomainData(levelData);
+      let sum = 0;
+      for (let i=0;i<levelData.length;i++){ const d = (levelData[i]-128)/128; sum += d*d; }
+      const rms = Math.sqrt(sum / levelData.length);
+      level += (Math.min(1, rms * 5.5) - level) * 0.22;
+    } else if (phase === "speaking"){
+      level += ((0.35 + 0.25*Math.sin(phaseT*7.5) + 0.12*Math.sin(phaseT*3.1)) - level) * 0.16;
+    } else if (phase === "thinking"){
+      level += ((0.14 + 0.06*Math.sin(phaseT*2.2)) - level) * 0.08;
+    } else {
+      level += (0.05 + 0.03*Math.sin(phaseT*1.1) - level) * 0.05;
+    }
+
+    const r = 62 + level * 34;
+    surface.setAttribute("r", r.toFixed(1));
+    const tint = phase === "speaking" ? "127,179,164" : "217,164,65";
+    const lit = phase === "idle" ? "233,226,212" : tint;
+    surface.setAttribute("stroke", `rgba(${lit},${(0.26 + level*0.5).toFixed(2)})`);
+    surface.setAttribute("fill",   `rgba(${lit},${(0.04 + level*0.08).toFixed(3)})`);
+    core.setAttribute("fill",      `rgba(${lit},${(0.35 + level*0.5).toFixed(2)})`);
+
+    if (phase === "speaking" || phase === "listening"){
+      const a = (phaseT % 2.4) / 2.4, b = ((phaseT + 1.2) % 2.4) / 2.4;
+      rippleA.setAttribute("r", (66 + a*44).toFixed(1));
+      rippleA.setAttribute("opacity", ((1-a) * 0.22 * (0.3 + level)).toFixed(3));
+      rippleA.setAttribute("stroke", `rgba(${tint},1)`);
+      rippleB.setAttribute("r", (66 + b*44).toFixed(1));
+      rippleB.setAttribute("opacity", ((1-b) * 0.22 * (0.3 + level)).toFixed(3));
+      rippleB.setAttribute("stroke", `rgba(${tint},1)`);
+    } else {
+      rippleA.setAttribute("opacity", 0);
+      rippleB.setAttribute("opacity", 0);
+    }
+    raf = requestAnimationFrame(animate);
+  }
+  raf = requestAnimationFrame(animate);
+
+  /* ── マイクの音量（ふるまいの表示だけに使う）── */
+  async function openMeter(){
+    // スマホでは録音ストリームを二重に開くと認識が止まるので、波は使わない
+    if (IS_MOBILE) { analyser = null; return; }
+    try{
+      micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      levelData = new Uint8Array(analyser.fftSize);
+      src.connect(analyser);
+    }catch(e){ analyser = null; }  // 使えなくても会話は続けられる
+  }
+  function closeMeter(){
+    try{ micStream && micStream.getTracks().forEach(t => t.stop()); }catch(e){}
+    try{ audioCtx && audioCtx.close(); }catch(e){}
+    micStream = null; audioCtx = null; analyser = null;
+  }
+
+  /* ── 音声認識 ──────────────────────────── */
+  function buildRecog(){
+    const r = new SR();
+    r.lang = "ja-JP";
+    r.continuous = true;
+    r.interimResults = true;
+
+    r.onstart = () => { recogAlive = true; };
+
+    r.onresult = (ev) => {
+      if (!session || phase === "speaking") return;
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++){
+        const res = ev.results[i];
+        if (res.isFinal) pendingUser += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      interimText = interim;
+      live.innerHTML = pendingUser
+        ? `<b>${escapeHtml(pendingUser)}</b>${escapeHtml(interim)}`
+        : escapeHtml(interim);
+      if (pendingUser.trim() || interim.trim()) armSilence();
+    };
+
+    r.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed"){
+        say("マイクの使用が許可されていません。アドレスバーのマイクのアイコンから許可してください。");
+        endSession();
+      } else if (ev.error === "no-speech" || ev.error === "aborted"){
+        /* よくあることなので黙って続ける */
+      } else if (ev.error === "network"){
+        say("音声認識サービスにつながりませんでした。ネットワークをご確認ください。");
+      }
+    };
+
+    r.onend = () => {
+      recogAlive = false;
+      if (!session || !wantRecog) return;
+      // Android は一区切りごとに勝手に止まる。溜まっていれば、そこを turn の切れ目とみなす
+      if (IS_MOBILE && (pendingUser.trim() || interimText.trim())){
+        commitTurn();
+        return;
+      }
+      setTimeout(startRecog, 180);
+    };
+    return r;
+  }
+
+  function startRecog(){
+    if (!session || recogAlive) return;
+    wantRecog = true;
+    try { recog.start(); } catch(e) { /* すでに動いている */ }
+  }
+  function stopRecog(){
+    wantRecog = false;
+    try { recog && recog.abort(); } catch(e){}
+    recogAlive = false;
+  }
+
+  function armSilence(){
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(commitTurn, SILENCE_MS);
+  }
+
+  async function commitTurn(){
+    clearTimeout(silenceTimer);
+    const text = (pendingUser + " " + interimText).replace(/\s+/g," ").trim();
+    pendingUser = ""; interimText = "";
+    if (!session || !text) return;
+    live.textContent = "";
+    addTurn("user", text);
+    await ask();
+  }
+
+  /* ── 提供元ごとの組み立て ──────────────── */
+  function sysText(){ return sysEl.value.trim() || DEFAULT_SYS; }
+
+  function buildRequest(key, history){
+    const model = modelEl.value.trim() || pconf().model;
+    const p = providerEl.value;
+
+    if (p === "gemini"){
+      return {
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+        headers: { "x-goog-api-key": key, "content-type": "application/json" },
+        body: {
+          systemInstruction: { parts: [{ text: sysText() }] },
+          contents: history.map(t => ({
+            role: t.role === "user" ? "user" : "model",
+            parts: [{ text: t.text }]
+          })),
+          generationConfig: { maxOutputTokens: 1024, temperature: 0.9 }
+        },
+        format: "sse-gemini"
+      };
+    }
+
+    if (p === "claude"){
+      return {
+        url: "https://api.anthropic.com/v1/messages",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: {
+          model, max_tokens: 1024, stream: true,
+          system: sysText(),
+          messages: history.map(t => ({ role: t.role, content: t.text }))
+        },
+        format: "sse-claude"
+      };
+    }
+
+    return {
+      url: "http://localhost:11434/api/chat",
+      headers: { "content-type": "application/json" },
+      body: {
+        model, stream: true,
+        messages: [{ role:"system", content: sysText() }]
+          .concat(history.map(t => ({ role: t.role, content: t.text })))
+      },
+      format: "ndjson-ollama"
+    };
+  }
+
+  function extractDelta(format, ev){
+    if (format === "sse-gemini"){
+      if (ev.error) throw new Error(ev.error.message || "APIエラー");
+      const c = ev.candidates && ev.candidates[0];
+      const parts = c && c.content && c.content.parts;
+      if (!parts) return "";
+      return parts.filter(p => !p.thought).map(p => p.text || "").join("");
+    }
+    if (format === "sse-claude"){
+      if (ev.type === "error") throw new Error((ev.error && ev.error.message) || "APIエラー");
+      if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") return ev.delta.text;
+      return "";
+    }
+    if (ev.error) throw new Error(ev.error);
+    return (ev.message && ev.message.content) || "";
+  }
+
+  function readableError(status, detail){
+    if (status === 400 && /API[_ ]?key/i.test(detail)) return "APIキーが受け付けられませんでした。設定を見直してください。";
+    if (status === 401 || status === 403) return "APIキーが無効か、権限がありません。";
+    if (status === 404) return "モデル名が見つかりません。設定のモデル欄をご確認ください。";
+    if (status === 429) return "無料枠の上限に達しました。少し待つか、明日また試してください。";
+    if (status >= 500) return "提供元のサーバーが混み合っています。少し待ってからどうぞ。";
+    return `${status} ${detail.slice(0, 160)}`;
+  }
+
+  /* ── 問い合わせ ────────────────────────── */
+  async function ask(){
+    const key = apiKeyEl.value.trim();
+    if (pconf().needsKey && !key){ say("設定からAPIキーを入れてください。"); endSession(); return; }
+
+    setPhase("thinking");
+    stopRecog();
+    sentenceBuf = "";
+    let full = "";
+    const idx = addTurn("assistant", "");
+
+    const req = buildRequest(key, turns.slice(0, idx).filter(t => t.text.trim()));
+
+    try{
+      const res = await fetch(req.url, {
+        method: "POST",
+        headers: req.headers,
+        body: JSON.stringify(req.body)
+      });
+
+      if (!res.ok){
+        const detail = await res.text();
+        throw new Error(readableError(res.status, detail));
+      }
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true){
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream:true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const raw of lines){
+          const line = raw.trim();
+          if (!line) continue;
+          let payload = line;
+          if (req.format.startsWith("sse")){
+            if (!line.startsWith("data:")) continue;
+            payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+          }
+          let ev; try { ev = JSON.parse(payload); } catch(e){ continue; }
+          const delta = extractDelta(req.format, ev);
+          if (delta){
+            full += delta;
+            turns[idx].text = full;
+            renderLog();
+            feedSpeech(delta);
+          }
+        }
+      }
+
+      flushSpeech();
+      if (!full.trim()){
+        turns.splice(idx,1); renderLog();
+        setPhase("listening"); startRecog();
+      }
+      say("");
+
+    }catch(err){
+      turns[idx].text = full || "（返答を受け取れませんでした）";
+      renderLog(); persist();
+      say("Claudeとのやり取りでつまずきました：" + err.message);
+      setPhase("listening");
+      startRecog();
+    }
+  }
+
+  /* ── 読み上げ ──────────────────────────── */
+  function feedSpeech(chunk){
+    if (!window.speechSynthesis) return;
+    sentenceBuf += chunk;
+    const parts = sentenceBuf.split(/(?<=[。！？!?\n])/);
+    sentenceBuf = parts.pop() || "";
+    parts.forEach(p => { if (p.trim()) enqueueSpeech(p.trim()); });
+  }
+  function flushSpeech(){
+    if (sentenceBuf.trim()) enqueueSpeech(sentenceBuf.trim());
+    sentenceBuf = "";
+    if (!speaking && !speakQueue.length && session){ setPhase("listening"); startRecog(); }
+  }
+  function enqueueSpeech(text){
+    speakQueue.push(text);
+    if (!speaking) nextSpeech();
+  }
+  function nextSpeech(){
+    if (!session){ speakQueue = []; speaking = false; return; }
+    const text = speakQueue.shift();
+    if (text === undefined){
+      speaking = false;
+      if (session) setTimeout(() => {
+        if (session && !speaking){ setPhase("listening"); startRecog(); }
+      }, RESUME_MS);
+      return;
+    }
+    speaking = true;
+    setPhase("speaking");
+    stopRecog();                       // 自分の声を聞き返さないように
+    const u = new SpeechSynthesisUtterance(text);
+    const v = voices[Number(voiceSel.value)];
+    if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "ja-JP"; }
+    u.rate = parseFloat(rateEl.value) || 1;
+    u.onend = () => setTimeout(nextSpeech, 60);
+    u.onerror = () => setTimeout(nextSpeech, 60);
+    try { speechSynthesis.speak(u); } catch(e){ setTimeout(nextSpeech, 60); }
+  }
+
+  /* ── 記録 ──────────────────────────────── */
+  function addTurn(role, text){
+    turns.push({ role, text, at: new Date().toISOString() });
+    renderLog(); persist();
+    return turns.length - 1;
+  }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+  }
+  function hhmm(iso){
+    const d = new Date(iso);
+    return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+  }
+  function renderLog(){
+    if (!turns.length){
+      logEl.innerHTML = '<p class="empty">まだ何もありません。<br>話しはじめると、ここに一言ずつ積もっていきます。</p>';
+    } else {
+      logEl.innerHTML = turns.map(t => `
+        <div class="turn ${t.role === "user" ? "you" : "ai"}">
+          <div class="meta"><span class="who">${t.role === "user" ? "わたし" : "Claude"}</span>${hhmm(t.at)}</div>
+          <div class="said">${escapeHtml(t.text)}</div>
+        </div>`).join("");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    countEl.textContent = `${turns.length} turns`;
+    const none = turns.length === 0;
+    ["btnCopy","btnMd","btnTxt","btnJson","btnClear"].forEach(id => { $(id).disabled = none; });
+  }
+  function persist(){ store.set("vc.turns", JSON.stringify(turns.slice(-400))); }
+
+  /* ── 書き出し ──────────────────────────── */
+  function stamp(){
+    const d = new Date(), p = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  }
+  function asPlain(){
+    return turns.map(t => `${hhmm(t.at)} ${t.role === "user" ? "わたし" : "Claude"}\n${t.text}\n`).join("\n");
+  }
+  function asMarkdown(){
+    const d = new Date();
+    return `---\ntitle: 音声対話の文字起こし\ndate: ${d.toISOString()}\nmodel: ${modelEl.value.trim()}\nturns: ${turns.length}\n---\n\n`
+      + turns.map(t => `### ${t.role === "user" ? "わたし" : "Claude"} — ${hhmm(t.at)}\n\n${t.text}\n`).join("\n");
+  }
+  function download(name, text, type){
+    const blob = new Blob([text], { type });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    flash();
+  }
+  function flash(){
+    savedFlag.classList.add("show");
+    setTimeout(() => savedFlag.classList.remove("show"), 1600);
+  }
+
+  $("btnCopy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(asPlain()); savedFlag.textContent = "コピーしました"; flash(); }
+    catch(e){ say("コピーできませんでした。書き出しからお試しください。"); }
+  });
+  $("btnMd").addEventListener("click", () => { savedFlag.textContent="保存しました"; download(`voice-${stamp()}.md`, asMarkdown(), "text/markdown"); });
+  $("btnTxt").addEventListener("click", () => { savedFlag.textContent="保存しました"; download(`voice-${stamp()}.txt`, asPlain(), "text/plain"); });
+  $("btnJson").addEventListener("click", () => {
+    savedFlag.textContent="保存しました";
+    download(`voice-${stamp()}.json`, JSON.stringify({
+      recorded_at: new Date().toISOString(),
+      model: modelEl.value.trim(),
+      system: sysEl.value.trim(),
+      turns
+    }, null, 2), "application/json");
+  });
+  $("btnClear").addEventListener("click", () => {
+    if (!confirm("文字起こしを消します。書き出していないぶんは戻せません。")) return;
+    turns = []; renderLog(); persist();
+  });
+
+  /* ── 二つのボタン ─────────────────────── */
+  async function startSession(){
+    if (!SR) return;
+    const key = apiKeyEl.value.trim();
+    if (!key){ say("設定をひらいて、APIキーを入れてください。"); return; }
+    say("");
+    session = true;
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+    pendingUser = ""; interimText = ""; live.textContent = "";
+    await openMeter();
+
+    // スマホは「画面に触れた瞬間」でないと読み上げが解錠されないので、ここで一度鳴らす
+    if (window.speechSynthesis){
+      speechSynthesis.cancel();
+      try{
+        const wake = new SpeechSynthesisUtterance(" ");
+        wake.volume = 0; wake.lang = "ja-JP";
+        speechSynthesis.speak(wake);
+      }catch(e){}
+    }
+    // 話している間に画面が消えないように
+    try{
+      if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+    }catch(e){ wakeLock = null; }
+
+    recog = buildRecog();
+    setPhase("listening");
+    startRecog();
+  }
+
+  function endSession(){
+    session = false;
+    clearTimeout(silenceTimer);
+    stopRecog();
+    speakQueue = []; speaking = false; sentenceBuf = "";
+    try { window.speechSynthesis && speechSynthesis.cancel(); } catch(e){}
+    closeMeter();
+    try{ wakeLock && wakeLock.release(); }catch(e){}
+    wakeLock = null;
+    live.textContent = "";
+    setPhase("idle");
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+    persist();
+  }
+
+  btnStart.addEventListener("click", startSession);
+  btnStop.addEventListener("click", endSession);
+
+  // スマホで画面を消して戻ってきたときの復帰
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible" || !session) return;
+    try{
+      if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+    }catch(e){}
+    if (phase === "listening") startRecog();
+  });
+  window.addEventListener("beforeunload", () => { try{ speechSynthesis.cancel(); }catch(e){} });
+
+  setPhase("idle");
+})();
+</script>
