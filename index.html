@@ -447,6 +447,14 @@ input[type=range]{width:100%;accent-color:var(--ember)}
 
   function say(msg){ notice.textContent = msg || ""; }
 
+  window.addEventListener("error", (e) => {
+    say("不具合が起きました：" + (e.message || "原因不明") + (e.lineno ? "（" + e.lineno + "行目）" : ""));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const r = e.reason;
+    say("処理が途中で止まりました：" + ((r && r.message) ? r.message : String(r)));
+  });
+
   // シークレットモードなどで記憶できない環境を早めに知らせる
   (function checkStore(){
     try{
@@ -979,26 +987,40 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   });
 
   /* ── 二つのボタン ─────────────────────── */
-  async function startSession(){
-    if (!SR) return;
+  function startSession(){
+    if (!SR){
+      say("このブラウザでは音声認識が使えません。Android の Chrome でお試しください。");
+      return;
+    }
     const key = apiKeyEl.value.trim();
-    if (!key){ say("設定をひらいて、APIキーを入れてください。"); return; }
-    say("");
-    session = true;
-    btnStart.disabled = true;
-    btnStop.disabled = false;
-    pendingUser = ""; interimText = ""; priorFinals = ""; curFinals = "";
-    committing = false; netRetries = 0; lastApiError = ""; live.textContent = "";
-    await openMeter();
+    if (pconf().needsKey && !key){ say("設定をひらいて、APIキーを入れてください。"); return; }
 
-    // 話している間に画面が消えないように
     try{
-      if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
-    }catch(e){ wakeLock = null; }
+      say("");
+      session = true;
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      pendingUser = ""; interimText = ""; priorFinals = ""; curFinals = "";
+      committing = false; netRetries = 0; lastApiError = ""; live.textContent = "";
 
-    recog = buildRecog();
-    setPhase("listening");
-    startRecog();
+      // ここまでを指が触れた流れの中で終わらせる。
+      // await を挟むと Android が「操作によるもの」と認めず、認識が始まらない
+      recog = buildRecog();
+      setPhase("listening");
+      startRecog();
+    }catch(err){
+      say("開始できませんでした：" + (err && err.message ? err.message : err));
+      endSession();
+      return;
+    }
+
+    // 見た目と画面消灯の手当ては、始まったあとで静かに
+    openMeter();
+    (async () => {
+      try{
+        if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+      }catch(e){ wakeLock = null; }
+    })();
   }
 
   function endSession(){
