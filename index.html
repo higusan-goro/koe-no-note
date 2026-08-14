@@ -327,6 +327,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   let phase = "idle";           // idle | listening | thinking | speaking
   let recog = null, recogAlive = false, wantRecog = false;
   let silenceTimer = null, pendingUser = "", interimText = "";
+  let priorFinals = "", curFinals = "", committing = false;
   let turns = [];               // {role:'user'|'assistant', text, at}
   let audioCtx=null, analyser=null, micStream=null, levelData=null;
   let level = 0, phaseT = 0, raf = null;
@@ -541,20 +542,23 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   function buildRecog(){
     const r = new SR();
     r.lang = "ja-JP";
-    r.continuous = true;
+    r.continuous = !IS_MOBILE;   // スマホは一区切りずつのほうが安定する
     r.interimResults = true;
 
     r.onstart = () => { recogAlive = true; };
 
     r.onresult = (ev) => {
-      if (!session || phase === "speaking") return;
-      let interim = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++){
+      if (!session || phase === "speaking" || committing) return;
+      // 足し算ではなく、届いた一覧から毎回composeし直す（重複防止）
+      let finals = "", interim = "";
+      for (let i = 0; i < ev.results.length; i++){
         const res = ev.results[i];
-        if (res.isFinal) pendingUser += res[0].transcript;
+        if (res.isFinal) finals += res[0].transcript;
         else interim += res[0].transcript;
       }
+      curFinals = finals;
       interimText = interim;
+      pendingUser = priorFinals + curFinals;
       live.innerHTML = pendingUser
         ? `<b>${escapeHtml(pendingUser)}</b>${escapeHtml(interim)}`
         : escapeHtml(interim);
@@ -575,7 +579,9 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     r.onend = () => {
       recogAlive = false;
       if (!session || !wantRecog) return;
-      // Android は一区切りごとに勝手に止まる。溜まっていれば、そこを turn の切れ目とみなす
+      priorFinals = pendingUser;   // 確定済みをここで引き継ぎ、次の一覧とは混ぜない
+      curFinals = "";
+      // Android は一区切りごとに止まる。溜まっていれば、そこを turn の切れ目とみなす
       if (IS_MOBILE && (pendingUser.trim() || interimText.trim())){
         commitTurn();
         return;
@@ -602,13 +608,20 @@ input[type=range]{width:100%;accent-color:var(--ember)}
   }
 
   async function commitTurn(){
+    if (committing) return;
     clearTimeout(silenceTimer);
     const text = (pendingUser + " " + interimText).replace(/\s+/g," ").trim();
-    pendingUser = ""; interimText = "";
+    pendingUser = ""; interimText = ""; priorFinals = ""; curFinals = "";
     if (!session || !text) return;
+
+    // 直前とまったく同じ発話は、認識の送り直しとみなして捨てる
+    const lastUser = [...turns].reverse().find(t => t.role === "user");
+    if (lastUser && lastUser.text === text){ live.textContent = ""; return; }
+
+    committing = true;
     live.textContent = "";
     addTurn("user", text);
-    await ask();
+    try { await ask(); } finally { committing = false; }
   }
 
   /* ── 提供元ごとの組み立て ──────────────── */
@@ -906,7 +919,8 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     session = true;
     btnStart.disabled = true;
     btnStop.disabled = false;
-    pendingUser = ""; interimText = ""; live.textContent = "";
+    pendingUser = ""; interimText = ""; priorFinals = ""; curFinals = "";
+    committing = false; live.textContent = "";
     await openMeter();
 
     // スマホは「画面に触れた瞬間」でないと読み上げが解錠されないので、ここで一度鳴らす
@@ -932,6 +946,7 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     session = false;
     clearTimeout(silenceTimer);
     stopRecog();
+    priorFinals = ""; curFinals = ""; committing = false;
     speakQueue = []; speaking = false; sentenceBuf = ""; speakGroup = "";
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch(e){}
     closeMeter();
