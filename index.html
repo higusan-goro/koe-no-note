@@ -760,13 +760,17 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     if (status === 400 && /API[_ ]?key/i.test(detail)) return "APIキーが受け付けられませんでした。設定を見直してください。";
     if (status === 401 || status === 403) return "APIキーが無効か、権限がありません。";
     if (status === 404) return "モデル名が見つかりません。設定のモデル欄をご確認ください。";
-    if (status === 429) return "無料枠の上限に達しました。少し待つか、明日また試してください。";
+    if (status === 429){
+      if (/per\s*day|daily|PerDay/i.test(detail)) return "無料枠の一日分を使い切りました。日本時間の夕方ごろにリセットされます。";
+      if (/per\s*minute|PerMinute/i.test(detail)) return "一分あたりの上限です。少し間をおいてから、もう一度話しかけてください。";
+      return "無料枠の上限に達しました。設定でモデルを軽いものに変えると通ることがあります。";
+    }
     if (status >= 500) return "提供元のサーバーが混み合っています。少し待ってからどうぞ。";
     return `${status} ${detail.slice(0, 160)}`;
   }
 
   /* ── 問い合わせ ────────────────────────── */
-  async function ask(){
+  async function ask(retried){
     const key = apiKeyEl.value.trim();
     if (pconf().needsKey && !key){ say("設定からAPIキーを入れてください。"); endSession(); return; }
 
@@ -776,7 +780,9 @@ input[type=range]{width:100%;accent-color:var(--ember)}
     let full = "";
     const idx = addTurn("assistant", "");
 
-    const req = buildRequest(key, turns.slice(0, idx).filter(t => t.text.trim()));
+    // 直近のやり取りだけを送る。会話が伸びるほど毎回の消費が増え、上限に当たりやすくなる
+    const history = turns.slice(0, idx).filter(t => t.text.trim()).slice(-12);
+    const req = buildRequest(key, history);
 
     try{
       const res = await fetch(req.url, {
@@ -785,6 +791,12 @@ input[type=range]{width:100%;accent-color:var(--ember)}
         body: JSON.stringify(req.body)
       });
 
+      if (res.status === 429 && !retried){
+        say("混み合っています。少し待ってやり直します…");
+        await new Promise(r => setTimeout(r, 20000));
+        turns.splice(idx, 1); renderLog();
+        return ask(true);
+      }
       if (!res.ok){
         const detail = await res.text();
         throw new Error(readableError(res.status, detail));
